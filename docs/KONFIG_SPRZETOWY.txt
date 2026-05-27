@@ -1,0 +1,46 @@
+KONFIGURACJA SPRZĘTOWA — nawijarka / test (ESP32 + LCD I2C + enkoder + silnik krokowy)
+================================================================================
+Plik jest zsynchronizowany z include/hw_config.h — zmiany pinów rób w jednym miejscu
+lub utrzymuj oba pliki zgodne.
+
+1. Kontroler
+   - ESP32 DevKit (Arduino framework, projekt PlatformIO w tym repozytorium).
+
+2. Wyświetlacz LCD 16x2 (magistrala I2C, ekspander PCF8574)
+   - VCC → 5V (lub 3V3 zależnie od modułu), GND → GND
+   - SDA → GPIO21
+   - SCL → GPIO22
+   - Domyślny adres I2C: 0x27 (często także 0x3F — wtedy zmień kLcdI2cAddr w hw_config.h)
+
+3. Enkoder obrotowy z przyciskiem
+   - CLK (A) → GPIO18
+   - DT  (B) → GPIO19
+   - COM / + → 3V3
+   - SW (przycisk) → GPIO23 (drugi bieg przycisku do masy; w kodzie INPUT_PULLUP)
+   - Jeśli enkoder ma tylko wyjścia otwarty kolektor — dodaj rezystory pull-up do 3V3.
+
+4. Sterownik silnika krokowego (np. A4988 / DRV8825 / TMC w STEP/DIR)
+   - STEP → GPIO25
+   - DIR  → GPIO26
+   - ENABLE → GPIO27 (opcjonalnie; A4988: stan LOW zwykle włącza mostki)
+   - GND i zasilanie silnika zgodnie z kartą katalogową sterownika
+   - MS1/MS2/MS3 (lub CFG) ustaw na wybrany podział mikrokroków — musi zgadzać się
+     z wartością kMicrostepping w hw_config.h (np. 1/16).
+
+5. Silnik
+   - Silnik krokowy dwufazowy dopasowany do sterownika i zasilania.
+   - Parametr kFullStepsPerRevMotor = 200 jest typowy; kMicrostepping zależy od mostka.
+   - kGearRatioMotorToSpindle: stosunek obrotów silnika do obrotów wrzeciona (1.0 bez przekładni).
+
+6. Bezpieczeństwo drutu nawojowego
+   - Płynny rozruch realizuje biblioteka AccelStepper (trapezoidalny profil prędkości).
+   - Zbyt agresywne kMotorAccelerationStepsPerSec2 zwiększa ryzyko drgań — zmniejsz wartość.
+   - Mikrokroki zmniejszają wibracje przy niskich prędkościach.
+
+7. Oprogramowanie
+   - Katalog projektu: platformio.ini + src/main.cpp
+   - Budowanie: pio run -e esp32dev
+   - Wgrywanie: pio run -e esp32dev -t upload
+
+================================================================================
+Koniec pliku konfiguracyjnego.
