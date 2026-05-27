@@ -7,7 +7,7 @@
 
 namespace {
 
-LiquidCrystal_I2C gLcd(kLcdI2cAddr, 16, 2);
+LiquidCrystal_I2C gLcd(kLcdI2cAddr, kLcdCols, kLcdRows);
 AccelStepper gStepper(AccelStepper::DRIVER, kPinMotorStep, kPinMotorDir);
 
 enum class Phase { Selecting, Running };
@@ -39,11 +39,15 @@ void motorBridgeEnable(bool on) {
   if (kPinMotorEnable < 0) {
     return;
   }
+  // Zgodnie z KONFIG_SPRZETOWY.txt: LOW = sterownik włączony.
   digitalWrite(kPinMotorEnable, on ? LOW : HIGH);
 }
 
 void lcdHardwareInit() {
-  Wire.begin(kPinLcdSda, kPinLcdScl);
+  // Pico (earlephilhower): I2C na GP0 / GP1 zgodnie z KONFIG_SPRZETOWY.txt.
+  Wire.setSDA(kPinLcdSda);
+  Wire.setSCL(kPinLcdScl);
+  Wire.begin();
   gLcd.init();
   gLcd.backlight();
   gLcd.clear();
@@ -58,11 +62,15 @@ void lcdRenderSelecting(bool forceFullRedraw) {
 
   gLcd.clear();
   gLcd.setCursor(0, 0);
-  gLcd.print(F("RPM silnika"));
+  gLcd.print(F("PICKUP WINDER"));
   gLcd.setCursor(0, 1);
-  char line[17];
-  snprintf(line, sizeof(line), "%4ld ENC SW=start", static_cast<long>(gRpm));
+  gLcd.print(F("RPM (1-1500):"));
+  gLcd.setCursor(0, 2);
+  char line[21];
+  snprintf(line, sizeof(line), "   %4ld RPM", static_cast<long>(gRpm));
   gLcd.print(line);
+  gLcd.setCursor(0, 3);
+  gLcd.print(F("ENC=zmiana SW=start"));
 }
 
 void lcdRenderRunning(bool forceFullRedraw) {
@@ -74,11 +82,15 @@ void lcdRenderRunning(bool forceFullRedraw) {
 
   gLcd.clear();
   gLcd.setCursor(0, 0);
-  gLcd.print(F("Praca"));
+  gLcd.print(F("Praca silnika"));
   gLcd.setCursor(0, 1);
-  char line[17];
-  snprintf(line, sizeof(line), "RPM %4ld", static_cast<long>(gRpm));
+  char line[21];
+  snprintf(line, sizeof(line), "RPM zadane: %4ld", static_cast<long>(gRpm));
   gLcd.print(line);
+  gLcd.setCursor(0, 2);
+  gLcd.print(F("TMC2209 STEP/DIR"));
+  gLcd.setCursor(0, 3);
+  gLcd.print(F("Hall A3144: GP9"));
 }
 
 void motorBeginConstantSpindleRpm() {
@@ -106,7 +118,6 @@ void encoderPollAndApply() {
   const uint8_t b = static_cast<uint8_t>(digitalRead(kPinEncDt) == HIGH);
   const uint8_t ab = static_cast<uint8_t>((a << 1) | b);
 
-  // Pełna tabela przejść Graya (2 bity stanu -> kierunek).
   static const int8_t kQuadDelta[16] = {
       0, +1, -1, 0, -1, 0, 0, +1, +1, 0, 0, -1, 0, -1, +1, 0};
 
@@ -153,7 +164,10 @@ void setup() {
   pinMode(kPinEncClk, INPUT_PULLUP);
   pinMode(kPinEncDt, INPUT_PULLUP);
   pinMode(kPinEncSw, INPUT_PULLUP);
+  pinMode(kPinHall3144, INPUT_PULLUP);
 
+  pinMode(kPinMotorStep, OUTPUT);
+  pinMode(kPinMotorDir, OUTPUT);
   if (kPinMotorEnable >= 0) {
     pinMode(kPinMotorEnable, OUTPUT);
     motorBridgeEnable(false);

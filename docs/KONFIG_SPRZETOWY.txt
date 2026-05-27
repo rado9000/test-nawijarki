@@ -99,3 +99,12 @@ MICROSTEP (sprzęt + liczba kroków na obrót w oprogramowaniu)
   Kroki na obrót w UI:     1600 (= 200 × 8)
 
 ================================================================================
+
+--------------------------------------------------------------------------------
+FIRMWARE (PlatformIO)
+--------------------------------------------------------------------------------
+
+  Rdzeń Arduino: earlephilhower/arduino-pico (powód: I2C LCD na GP0/GP1).
+  Środowisko: pio run -e pico
+  Konfiguracja pinów w kodzie: include/hw_config.h
+
