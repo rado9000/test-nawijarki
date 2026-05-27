@@ -10,128 +10,133 @@ namespace {
 LiquidCrystal_I2C gLcd(kLcdI2cAddr, 16, 2);
 AccelStepper gStepper(AccelStepper::DRIVER, kPinMotorStep, kPinMotorDir);
 
-enum class AppState { SelectingRpm, Running };
+enum class Phase { Selecting, Running };
 
-AppState gState = AppState::SelectingRpm;
-int32_t gSelectedRpm = 100;
-int32_t gLastDrawnRpm = -1;
-uint32_t gLastLcdUpdateMs = 0;
+Phase gPhase = Phase::Selecting;
+int32_t gRpm = 100;
 
-int gLastEncClk = HIGH;
-int gSwLastRaw = HIGH;
+uint32_t gLastLcdMs = 0;
+int32_t gLastLcdRpm = -1;
+
+uint8_t gEncPrevAb = 0;
+
+int gSwRaw = HIGH;
 int gSwStable = HIGH;
-uint32_t gSwLastTransitionMs = 0;
+uint32_t gSwTransitionMs = 0;
 
-float motorStepsPerRev() {
-  return kFullStepsPerRevMotor * static_cast<float>(kMicrostepping);
-}
-
-float rpmToStepperMaxSpeed(float rpmSpindle) {
+float motorStepsPerSecondAtSpindleRpm(float rpmSpindle) {
   const float motorRpm = rpmSpindle * kGearRatioMotorToSpindle;
-  const float stepsPerSec = (motorRpm / 60.0f) * motorStepsPerRev();
-  if (stepsPerSec < 1.0f) {
-    return 1.0f;
+  const float stepsPerRev =
+      kFullStepsPerRevMotor * static_cast<float>(kMicrostepping);
+  float sps = (motorRpm / 60.0f) * stepsPerRev;
+  if (sps < 1.0f) {
+    sps = 1.0f;
   }
-  return stepsPerSec;
+  return sps;
 }
 
-void motorDriverEnable(bool on) {
+void motorBridgeEnable(bool on) {
   if (kPinMotorEnable < 0) {
     return;
   }
-  // A4988/DRV8825: pin ENABLE często aktywny w niskim stanie.
   digitalWrite(kPinMotorEnable, on ? LOW : HIGH);
 }
 
-void lcdInit() {
+void lcdHardwareInit() {
   Wire.begin(kPinLcdSda, kPinLcdScl);
   gLcd.init();
   gLcd.backlight();
   gLcd.clear();
 }
 
-void lcdDrawSelecting(bool force) {
-  if (!force && gSelectedRpm == gLastDrawnRpm) {
+void lcdRenderSelecting(bool forceFullRedraw) {
+  if (!forceFullRedraw && gRpm == gLastLcdRpm) {
     return;
   }
-  gLastDrawnRpm = gSelectedRpm;
-  gLastLcdUpdateMs = millis();
+  gLastLcdRpm = gRpm;
+  gLastLcdMs = millis();
 
   gLcd.clear();
   gLcd.setCursor(0, 0);
-  gLcd.print("Ustaw RPM");
+  gLcd.print(F("RPM silnika"));
   gLcd.setCursor(0, 1);
   char line[17];
-  snprintf(line, sizeof(line), "%4d ENC  SW=start", static_cast<int>(gSelectedRpm));
+  snprintf(line, sizeof(line), "%4ld ENC SW=start", static_cast<long>(gRpm));
   gLcd.print(line);
 }
 
-void lcdDrawRunning(bool force) {
+void lcdRenderRunning(bool forceFullRedraw) {
   const uint32_t now = millis();
-  if (!force && (now - gLastLcdUpdateMs) < kLcdRefreshWhileRunningMs) {
+  if (!forceFullRedraw && (now - gLastLcdMs) < kLcdRefreshWhileRunningMs) {
     return;
   }
-  gLastLcdUpdateMs = now;
+  gLastLcdMs = now;
 
   gLcd.clear();
   gLcd.setCursor(0, 0);
-  gLcd.print("Praca");
+  gLcd.print(F("Praca"));
   gLcd.setCursor(0, 1);
   char line[17];
-  snprintf(line, sizeof(line), "RPM %4d", static_cast<int>(gSelectedRpm));
+  snprintf(line, sizeof(line), "RPM %4ld", static_cast<long>(gRpm));
   gLcd.print(line);
 }
 
-void startMotorAtSelectedRpm() {
-  motorDriverEnable(true);
-  const float maxSpeed = rpmToStepperMaxSpeed(static_cast<float>(gSelectedRpm));
-  gStepper.setMaxSpeed(maxSpeed);
-  // Przyspieszenie skalowane do prędkości: przy niskich RPM unikasz zbyt ostrego szarpnięcia.
-  float accel = maxSpeed * 1.2f;
-  const float kAccelMin = 80.0f;
-  if (accel < kAccelMin) {
-    accel = kAccelMin;
+void motorBeginConstantSpindleRpm() {
+  motorBridgeEnable(true);
+
+  const float maxStepsPerSec = motorStepsPerSecondAtSpindleRpm(static_cast<float>(gRpm));
+  gStepper.setMaxSpeed(maxStepsPerSec);
+
+  float accel = maxStepsPerSec * 1.15f;
+  constexpr float kAccelFloor = 60.0f;
+  if (accel < kAccelFloor) {
+    accel = kAccelFloor;
   }
   if (accel > kMotorAccelerationStepsPerSec2) {
     accel = kMotorAccelerationStepsPerSec2;
   }
   gStepper.setAcceleration(accel);
-  // Długi ruch: AccelStepper sam płynnie rozpędzi silnik do setMaxSpeed i utrzyma stałe obroty.
-  constexpr long kLongRunSteps = 200000000L;
-  gStepper.moveTo(gStepper.currentPosition() + kLongRunSteps);
+
+  constexpr long kStepsVirtuallyInfinite = 300000000L;
+  gStepper.moveTo(gStepper.currentPosition() + kStepsVirtuallyInfinite);
 }
 
-void pollEncoderRotation() {
-  const int clk = digitalRead(kPinEncClk);
-  if (clk == gLastEncClk) {
+void encoderPollAndApply() {
+  const uint8_t a = static_cast<uint8_t>(digitalRead(kPinEncClk) == HIGH);
+  const uint8_t b = static_cast<uint8_t>(digitalRead(kPinEncDt) == HIGH);
+  const uint8_t ab = static_cast<uint8_t>((a << 1) | b);
+
+  // Pełna tabela przejść Graya (2 bity stanu -> kierunek).
+  static const int8_t kQuadDelta[16] = {
+      0, +1, -1, 0, -1, 0, 0, +1, +1, 0, 0, -1, 0, -1, +1, 0};
+
+  const int8_t delta = kQuadDelta[(static_cast<uint8_t>(gEncPrevAb << 2)) | ab];
+  gEncPrevAb = ab;
+  if (delta == 0) {
     return;
   }
-  if (digitalRead(kPinEncDt) != clk) {
-    gSelectedRpm++;
-  } else {
-    gSelectedRpm--;
-  }
-  if (gSelectedRpm < kRpmMin) {
-    gSelectedRpm = kRpmMin;
-  }
-  if (gSelectedRpm > kRpmMax) {
-    gSelectedRpm = kRpmMax;
-  }
-  gLastEncClk = clk;
 
-  if (gState == AppState::SelectingRpm) {
-    lcdDrawSelecting(false);
+  gRpm += static_cast<int32_t>(delta);
+  if (gRpm < kRpmMin) {
+    gRpm = kRpmMin;
+  }
+  if (gRpm > kRpmMax) {
+    gRpm = kRpmMax;
+  }
+
+  if (gPhase == Phase::Selecting) {
+    lcdRenderSelecting(false);
   }
 }
 
-bool pollEncoderButtonPressed() {
+bool encoderSwitchPressedEdge() {
   const int raw = digitalRead(kPinEncSw);
   const uint32_t now = millis();
-  if (raw != gSwLastRaw) {
-    gSwLastTransitionMs = now;
-    gSwLastRaw = raw;
+  if (raw != gSwRaw) {
+    gSwTransitionMs = now;
+    gSwRaw = raw;
   }
-  if ((now - gSwLastTransitionMs) < kEncoderButtonDebounceMs) {
+  if ((now - gSwTransitionMs) < kEncoderButtonDebounceMs) {
     return false;
   }
   if (raw == gSwStable) {
@@ -151,36 +156,39 @@ void setup() {
 
   if (kPinMotorEnable >= 0) {
     pinMode(kPinMotorEnable, OUTPUT);
-    motorDriverEnable(false);
+    motorBridgeEnable(false);
   }
 
-  lcdInit();
-  lcdDrawSelecting(true);
+  lcdHardwareInit();
+  lcdRenderSelecting(true);
 
-  gLastEncClk = digitalRead(kPinEncClk);
-  gSwLastRaw = digitalRead(kPinEncSw);
-  gSwStable = gSwLastRaw;
+  {
+    const uint8_t a = static_cast<uint8_t>(digitalRead(kPinEncClk) == HIGH);
+    const uint8_t b = static_cast<uint8_t>(digitalRead(kPinEncDt) == HIGH);
+    gEncPrevAb = static_cast<uint8_t>((a << 1) | b);
+  }
+  gSwRaw = digitalRead(kPinEncSw);
+  gSwStable = gSwRaw;
 }
 
 void loop() {
-  pollEncoderRotation();
-
-  if (gState == AppState::SelectingRpm) {
-    if (pollEncoderButtonPressed()) {
-      gState = AppState::Running;
-      startMotorAtSelectedRpm();
-      lcdDrawRunning(true);
+  if (gPhase == Phase::Selecting) {
+    encoderPollAndApply();
+    if (encoderSwitchPressedEdge()) {
+      gPhase = Phase::Running;
+      motorBeginConstantSpindleRpm();
+      lcdRenderRunning(true);
     }
     return;
   }
 
-  // Running: jak najwięcej czasu na stepper.run(), LCD tylko rzadko.
-  if (!gStepper.run()) {
-    // Teoretyczny koniec ruchu (przy bardzo długim moveTo praktycznie nieosiągalny).
-    motorDriverEnable(false);
-    gState = AppState::SelectingRpm;
-    lcdDrawSelecting(true);
+  const bool more = gStepper.run();
+  if (!more) {
+    motorBridgeEnable(false);
+    gPhase = Phase::Selecting;
+    gLastLcdRpm = -1;
+    lcdRenderSelecting(true);
     return;
   }
-  lcdDrawRunning(false);
+  lcdRenderRunning(false);
 }
