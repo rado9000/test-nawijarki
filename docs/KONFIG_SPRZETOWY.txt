@@ -77,7 +77,9 @@ TMC2209 — SYGNAŁY Z PICO
   24 V (+)   →  TMC VM
   24 V (-)   →  TMC GND (wspólna masa z Pico)
 
-  UART (opcjonalne, ale NIE używane w tym firmware):
+  UART (używane w tym firmware do konfiguracji TMC; STEP/DIR dalej z PWM):
+  GP4 (TX) -> PDN_UART przez rezystor ~1k
+  GP5 (RX) <- PDN_UART
 
 
 --------------------------------------------------------------------------------

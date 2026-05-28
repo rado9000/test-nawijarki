@@ -4,11 +4,19 @@
 
 #include <hardware/pwm.h>
 
+#include <TMCStepper.h>
+#include <SerialUART.h>
+
 #include <hw_config.h>
 
 namespace {
 
 LiquidCrystal_I2C gLcd(kLcdI2cAddr, kLcdCols, kLcdRows);
+
+// UART tylko do konfiguracji TMC (STEP jest z PWM).
+static SerialUART& gTmcSerial = Serial1;
+TMC2208Stepper gDriver2208(&gTmcSerial, kTmcRsenseOhm);
+TMC2209Stepper gDriver2209(&gTmcSerial, kTmcRsenseOhm, 0);
 
 enum class Phase { Selecting, Running };
 
@@ -36,7 +44,7 @@ uint32_t gLastRampUs = 0;
 
 float stepsPerSecondFromRpm(float rpmSpindle) {
   const float motorRpm = rpmSpindle * kGearRatioMotorToSpindle;
-  const float stepsPerRev = kFullStepsPerRevMotor * static_cast<float>(kDriverMicrosteps);
+  const float stepsPerRev = kFullStepsPerRevMotor * static_cast<float>(kTmcMicrosteps);
   float sps = (motorRpm / 60.0f) * stepsPerRev;
   if (sps < 0.0f) {
     sps = 0.0f;
@@ -47,6 +55,34 @@ float stepsPerSecondFromRpm(float rpmSpindle) {
 void motorEnable(bool on) {
   // LOW = enabled
   digitalWrite(kPinMotorEnable, on ? LOW : HIGH);
+}
+
+void tmcUartInit() {
+  gTmcSerial.setPinout(kPinTmcUartTx, kPinTmcUartRx);
+  gTmcSerial.begin(kTmcUartBaud);
+}
+
+template <typename TDriver>
+void tmcApplyConfig(TDriver& driver) {
+  driver.begin();
+  driver.pdn_disable(true);
+  driver.mstep_reg_select(true);
+  driver.toff(kTmcToff);
+  driver.rms_current(kTmcRmsCurrentmA);
+  driver.microsteps(kTmcMicrosteps);
+  if (kTmcForceSpreadCycle) {
+    driver.en_spreadCycle(true);
+  }
+  driver.pwm_autoscale(true);
+}
+
+void tmcConfigure() {
+  if (kUseTmc2209) {
+    tmcApplyConfig(gDriver2209);
+    gDriver2209.TCOOLTHRS(0xFFFFF);
+  } else {
+    tmcApplyConfig(gDriver2208);
+  }
 }
 
 void pwmStepInit() {
@@ -142,7 +178,7 @@ void lcdRenderRunning(bool forceFullRedraw) {
   snprintf(l0, sizeof(l0), "RUN");
   snprintf(l1, sizeof(l1), "RPM: %4ld", static_cast<long>(gRpm));
   snprintf(l2, sizeof(l2), "STEP: %6.0f Hz", static_cast<double>(gStepHzCurrent));
-  snprintf(l3, sizeof(l3), "TMC STEP/DIR");
+  snprintf(l3, sizeof(l3), kTmcForceSpreadCycle ? "TMC SpreadCycle" : "TMC Config");
 
   lcdPrintPadded(0, 0, l0);
   lcdPrintPadded(0, 1, l1);
@@ -295,6 +331,9 @@ void setup() {
   gSwRaw = digitalRead(kPinEncSw);
   gSwStable = gSwRaw;
   gEncIsrLastUs = micros();
+
+  tmcUartInit();
+  tmcConfigure();
 
   pwmStepInit();
 }
