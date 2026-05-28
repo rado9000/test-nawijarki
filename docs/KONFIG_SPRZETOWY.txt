@@ -77,12 +77,8 @@ TMC2209 — SYGNAŁY Z PICO
   24 V (+)   →  TMC VM
   24 V (-)   →  TMC GND (wspólna masa z Pico)
 
-  UART (używane do konfiguracji rejestrów przez TMCStepper):
-  GP4 (TX) -> PDN_UART przez rezystor ~1k
-  GP5 (RX) <- PDN_UART
+  UART (opcjonalne, ale NIE używane w tym firmware):
 
-  UWAGA (1-wire): zwykle łączy się TX+RX przez rezystor ~1k do PDN_UART (zależnie od modułu).
-  STEP/DIR nadal sterowane sprzętowo (PWM/timer), UART tylko konfiguracja.
 
 --------------------------------------------------------------------------------
 LOGIKA PINÓW (elektryka)
@@ -110,4 +106,3 @@ FIRMWARE (PlatformIO)
   Rdzeń Arduino: earlephilhower/arduino-pico (powód: I2C LCD na GP0/GP1).
   Środowisko: pio run -e pico
   Konfiguracja pinów w kodzie: include/hw_config.h
-

@@ -4,26 +4,11 @@
 
 #include <hardware/pwm.h>
 
-#include <TMCStepper.h>
-#include <SerialUART.h>
-
 #include <hw_config.h>
 
 namespace {
 
 LiquidCrystal_I2C gLcd(kLcdI2cAddr, kLcdCols, kLcdRows);
-
-// UART do konfiguracji TMC (impulsy STEP generowane sprzętowo PWM na RP2040).
-
-#if 1
-// Serial1 w arduino-pico to SerialUART, ma setPinout().
-static SerialUART& gTmcSerial = Serial1;
-#endif
-
-#if 1
-TMC2208Stepper gDriver2208(&gTmcSerial, kTmcRsenseOhm);
-TMC2209Stepper gDriver2209(&gTmcSerial, kTmcRsenseOhm, 0);
-#endif
 
 enum class Phase { Selecting, Running };
 
@@ -48,7 +33,7 @@ uint32_t gLastRampUs = 0;
 
 float stepsPerSecondFromRpm(float rpmSpindle) {
   const float motorRpm = rpmSpindle * kGearRatioMotorToSpindle;
-  const float stepsPerRev = kFullStepsPerRevMotor * static_cast<float>(kTmcMicrosteps);
+  const float stepsPerRev = kFullStepsPerRevMotor * static_cast<float>(kDriverMicrosteps);
   float sps = (motorRpm / 60.0f) * stepsPerRev;
   if (sps < 0.0f) {
     sps = 0.0f;
@@ -59,36 +44,6 @@ float stepsPerSecondFromRpm(float rpmSpindle) {
 void motorEnable(bool on) {
   // LOW = enabled
   digitalWrite(kPinMotorEnable, on ? LOW : HIGH);
-}
-
-void tmcUartInit() {
-  gTmcSerial.setPinout(kPinTmcUartTx, kPinTmcUartRx);
-  gTmcSerial.begin(kTmcUartBaud);
-}
-
-void tmcConfigure() {
-  if (kUseTmc2209) {
-    auto& driver = gDriver2209;
-    driver.begin();
-    driver.pdn_disable(true);
-    driver.mstep_reg_select(true);
-    driver.toff(kTmcToff);
-    driver.rms_current(kTmcRmsCurrentmA);
-    driver.microsteps(kTmcMicrosteps);
-    driver.en_spreadCycle(true);
-    driver.pwm_autoscale(true);
-    driver.TCOOLTHRS(0xFFFFF);
-  } else {
-    auto& driver = gDriver2208;
-    driver.begin();
-    driver.pdn_disable(true);
-    driver.mstep_reg_select(true);
-    driver.toff(kTmcToff);
-    driver.rms_current(kTmcRmsCurrentmA);
-    driver.microsteps(kTmcMicrosteps);
-    driver.en_spreadCycle(true);
-    driver.pwm_autoscale(true);
-  }
 }
 
 void pwmStepInit() {
@@ -176,7 +131,7 @@ void lcdRenderRunning(bool forceFullRedraw) {
   snprintf(line2, sizeof(line2), "STEP: %6.0f Hz", static_cast<double>(gStepHzCurrent));
   gLcd.print(line2);
   gLcd.setCursor(0, 3);
-  gLcd.print(kUseTmc2209 ? F("TMC2209 UART") : F("TMC2208 UART"));
+  gLcd.print(F("TMC STEP/DIR (noUART)"));
 }
 
 void encoderPollAndApply() {
@@ -242,7 +197,6 @@ void motorRampUpdate() {
 
   gStepHzTarget = stepsPerSecondFromRpm(static_cast<float>(gRpm));
 
-  // Limit pochodnej prędkości: steps/s^2.
   float maxDelta = kMotorAccelerationStepsPerSec2 * dt;
   if (maxDelta < 1.0f) {
     maxDelta = 1.0f;
@@ -282,9 +236,6 @@ void setup() {
   gSwRaw = digitalRead(kPinEncSw);
   gSwStable = gSwRaw;
 
-  tmcUartInit();
-  tmcConfigure();
-
   pwmStepInit();
 }
 
@@ -299,7 +250,6 @@ void loop() {
     return;
   }
 
-  // Running: brak ciężkiej logiki w pętli — PWM generuje STEP w HW.
   motorRampUpdate();
   lcdRenderRunning(false);
 }

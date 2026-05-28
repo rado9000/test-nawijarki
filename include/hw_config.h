@@ -2,6 +2,8 @@
 
 /**
  * Konfiguracja sprzętu — zgodna z docs/KONFIG_SPRZETOWY.txt.
+ * Wersja BEZ UART: driver TMC pracuje w trybie STEP/DIR, ustawienia prądu/mikrokroku
+ * realizujesz zworkami/VREF na module.
  */
 
 // --- LCD I2C (PCF8574 backpack, 20×4) ---
@@ -16,28 +18,15 @@ static constexpr int kPinEncClk = 6;   // GP6 — kanał A / CLK
 static constexpr int kPinEncDt = 7;    // GP7 — kanał B / DT
 static constexpr int kPinEncSw = 8;    // GP8 — przycisk (LOW = wciśnięty, INPUT_PULLUP)
 
-// --- Driver TMC (STEP/DIR + UART do konfiguracji) ---
+// --- Driver TMC (STEP/DIR, bez UART) ---
 static constexpr int kPinMotorStep = 2;    // GP2 — STEP (hardware PWM)
 static constexpr int kPinMotorDir = 3;     // GP3 — DIR
 static constexpr int kPinMotorEnable = 10; // GP10 — EN (LOW = sterownik włączony)
 
 static constexpr int kMotorDirCwLevel = HIGH;  // wg KONFIG_SPRZETOWY: HIGH = CW
 
-// UART (jednoprzewodowo przez rezystor zgodnie z opisem użytkownika)
-static constexpr int kPinTmcUartTx = 4;  // GP4 -> PDN_UART (przez ~1k)
-static constexpr int kPinTmcUartRx = 5;  // GP5 <- PDN_UART
-static constexpr uint32_t kTmcUartBaud = 115200;
-
-// Model drivera (domyślnie 2208; jeśli masz 2209, ustaw na 1)
-static constexpr bool kUseTmc2209 = false;
-
-// R_SENSE na module (typowo 0.11Ω; jeśli masz inne, zmień)
-static constexpr float kTmcRsenseOhm = 0.11f;
-
-// Ustawienia drivera (rejestry przez UART)
-static constexpr uint16_t kTmcRmsCurrentmA = 900;  // dopasuj do silnika
-static constexpr uint16_t kTmcToff = 5;
-static constexpr uint16_t kTmcMicrosteps = 8;      // 4 albo 8
+// Mikrokrok ustawiony sprzętowo na driverze (MS1/MS2...). Musi zgadzać się z tym parametrem.
+static constexpr uint16_t kDriverMicrosteps = 8;  // 4 albo 8
 
 // --- Czujnik Hall A3144 ---
 static constexpr int kPinHall3144 = 9;     // GP9 — INPUT_PULLUP
