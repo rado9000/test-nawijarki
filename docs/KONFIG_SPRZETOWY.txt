@@ -77,9 +77,12 @@ TMC2209 — SYGNAŁY Z PICO
   24 V (+)   →  TMC VM
   24 V (-)   →  TMC GND (wspólna masa z Pico)
 
-  UART (nieużywane w obecnym firmware):
-  GP4 — potencjalnie TX do PDN_UART (nie podłączone w wersji STEP/DIR)
-  GP5 — potencjalnie RX (nie podłączone w wersji STEP/DIR)
+  UART (używane do konfiguracji rejestrów przez TMCStepper):
+  GP4 (TX) -> PDN_UART przez rezystor ~1k
+  GP5 (RX) <- PDN_UART
+
+  UWAGA (1-wire): zwykle łączy się TX+RX przez rezystor ~1k do PDN_UART (zależnie od modułu).
+  STEP/DIR nadal sterowane sprzętowo (PWM/timer), UART tylko konfiguracja.
 
 --------------------------------------------------------------------------------
 LOGIKA PINÓW (elektryka)
