@@ -20,6 +20,9 @@ int32_t gLastLcdRpm = -1;
 
 uint8_t gEncPrevAb = 0;
 
+// Akceleracja enkodera: szybszy obrót => większy krok RPM.
+uint32_t gLastEncStepUs = 0;
+
 int gSwRaw = HIGH;
 int gSwStable = HIGH;
 uint32_t gSwTransitionMs = 0;
@@ -148,7 +151,23 @@ void encoderPollAndApply() {
     return;
   }
 
-  gRpm += static_cast<int32_t>(delta);
+  const uint32_t nowUs = micros();
+  const uint32_t dtUs = (gLastEncStepUs == 0) ? 1000000u : (nowUs - gLastEncStepUs);
+  gLastEncStepUs = nowUs;
+
+  // Dobór kroku RPM zależnie od szybkości kręcenia.
+  int32_t step = 1;
+  if (dtUs < 5000u) {
+    step = 25;
+  } else if (dtUs < 12000u) {
+    step = 10;
+  } else if (dtUs < 25000u) {
+    step = 5;
+  } else if (dtUs < 60000u) {
+    step = 2;
+  }
+
+  gRpm += static_cast<int32_t>(delta) * step;
   if (gRpm < kRpmMin) gRpm = kRpmMin;
   if (gRpm > kRpmMax) gRpm = kRpmMax;
 
