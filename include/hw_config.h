@@ -44,3 +44,9 @@ static constexpr float kMotorAccelerationStepsPerSec2 = 12000.0f;
 // LCD w trakcie pracy silnika — nie częściej niż ten interwał (ms).
 static constexpr uint32_t kLcdRefreshWhileRunningMs = 1000;
 static constexpr uint32_t kEncoderButtonDebounceMs = 40;
+
+// Minimalny odstęp impulsów enkodera (us) do odfiltrowania drgań styków.
+static constexpr uint32_t kEncoderMinPulseUs = 800;
+
+// Start silnika: zaczynamy od tej częstotliwości STEP (Hz), potem rampa do celu.
+static constexpr float kMotorStartStepHz = 30.0f;

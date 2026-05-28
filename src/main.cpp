@@ -21,6 +21,7 @@ int32_t gLastLcdRpm = -1;
 uint8_t gEncPrevAb = 0;
 volatile int32_t gEncPending = 0;
 volatile uint32_t gEncLastStepUs = 0;
+volatile uint32_t gEncIsrLastUs = 0;
 
 int gSwRaw = HIGH;
 int gSwStable = HIGH;
@@ -161,18 +162,20 @@ void encoderPollAndApply() {
     return;
   }
 
-  const uint32_t nowUs = micros();
-  const uint32_t dtUs = (lastUs == 0) ? 1000000u : (nowUs - lastUs);
-
+  // Precyzja: pojedynczy tick zawsze = 1 RPM (bez akceleracji).
   int32_t step = 1;
-  if (dtUs < 5000u) {
-    step = 25;
-  } else if (dtUs < 12000u) {
-    step = 10;
-  } else if (dtUs < 25000u) {
-    step = 5;
-  } else if (dtUs < 60000u) {
-    step = 2;
+  if (abs(ticks) > 1) {
+    const uint32_t nowUs = micros();
+    const uint32_t dtUs = (lastUs == 0) ? 1000000u : (nowUs - lastUs);
+    if (dtUs < 5000u) {
+      step = 25;
+    } else if (dtUs < 12000u) {
+      step = 10;
+    } else if (dtUs < 25000u) {
+      step = 5;
+    } else if (dtUs < 60000u) {
+      step = 2;
+    }
   }
 
   gRpm += ticks * step;
@@ -197,8 +200,14 @@ void encoderIsr() {
   if (delta == 0) {
     return;
   }
+    const uint32_t nowUs = micros();
+  const uint32_t dt = nowUs - gEncIsrLastUs;
+  if (dt < kEncoderMinPulseUs) {
+    return;
+  }
+  gEncIsrLastUs = nowUs;
   gEncPending += delta;
-  gEncLastStepUs = micros();
+  gEncLastStepUs = nowUs;
 }
 
 bool encoderSwitchPressedEdge() {
@@ -219,14 +228,18 @@ bool encoderSwitchPressedEdge() {
   return previous == HIGH && gSwStable == LOW;
 }
 
+void motorStop() {
+  pwmStepSetFrequency(0.0f);
+  motorEnable(false);
+}
+
 void motorStart() {
   digitalWrite(kPinMotorDir, kMotorDirCwLevel);
   motorEnable(true);
 
   gStepHzTarget = stepsPerSecondFromRpm(static_cast<float>(gRpm));
-  if (gStepHzCurrent < 1.0f) {
-    gStepHzCurrent = 1.0f;
-  }
+  // Start od niskiej częstotliwości, potem płynna rampa do celu.
+  gStepHzCurrent = kMotorStartStepHz;
   gLastRampUs = micros();
   pwmStepSetFrequency(gStepHzCurrent);
 }
@@ -281,6 +294,7 @@ void setup() {
   attachInterrupt(digitalPinToInterrupt(kPinEncDt), encoderIsr, CHANGE);
   gSwRaw = digitalRead(kPinEncSw);
   gSwStable = gSwRaw;
+  gEncIsrLastUs = micros();
 
   pwmStepInit();
 }
@@ -293,6 +307,14 @@ void loop() {
       motorStart();
       lcdRenderRunning(true);
     }
+    return;
+  }
+
+  if (encoderSwitchPressedEdge()) {
+    motorStop();
+    gPhase = Phase::Selecting;
+    gLastLcdRpm = -1;
+    lcdRenderSelecting(true);
     return;
   }
 
